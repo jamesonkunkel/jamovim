@@ -54,6 +54,16 @@ void enable_raw_mode(void) {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
 
+void enter_alternate_screen(void) {
+    printf("\033[?1049h");
+    fflush(stdout);
+}
+
+void exit_alternate_screen(void) {
+    printf("\033[?1049l");
+    fflush(stdout);
+}
+
 void get_terminal_size() {
     struct winsize w;
 
@@ -205,8 +215,14 @@ bool handle_input() {
 }
 
 int main(void) {
+    atexit(disable_raw_mode);
+    atexit(exit_alternate_screen);
+
     get_terminal_size();
     signal(SIGWINCH, handle_winch);
+
+    enable_raw_mode();
+    enter_alternate_screen();
 
     TextBody body;
     body.lines = malloc(1024 * sizeof(Line));
@@ -217,8 +233,6 @@ int main(void) {
 
     clear_screen();
     render(&body);
-
-    enable_raw_mode();
 
     bool running = true;
 
