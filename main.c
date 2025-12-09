@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -22,12 +23,17 @@ typedef struct {
     int len;
 } TextBody;
 
+// need to describe inputs as token
+// so for example 'j' functions to move you down, so '5j' functions to move 5 down
+// so 'j' is a terminating  character, and '5' is not, it's a modifier
+
+typedef struct Token {
+    char c;
+    bool terminating;
+} Token;
+
 // rows and cols available on current window size
 static int rows, cols;
-
-// user row and col cursor positions
-static int cursor_row = 1;
-static int cursor_col = 1;
 
 // current line and char position
 static int curr_line_num = 1;
@@ -35,6 +41,10 @@ static int curr_char_num = 1;
 
 // body of text
 TextBody body;
+
+// normal buffer and its length
+Token normal_buf[64];
+int normal_buf_len = 0;
 
 static struct termios orig_termios;
 enum Mode mode = NORMAL;
@@ -131,9 +141,16 @@ char *mode_to_text() {
     }
 }
 
-void render_ui() {
-    clear_screen();
+void render_normal_buf() {
+    char debug_normal_buf[128] = "";
+    for (int i = 0; i < normal_buf_len; i++) {
+        debug_normal_buf[i] = normal_buf[i].c;
+    }
 
+    print_in_row_col(debug_normal_buf, rows - 1, 1);
+}
+
+void render_ui() {
     // print mode to bottom left
     print_in_row_col(mode_to_text(), rows, 1);
 
@@ -144,6 +161,8 @@ void render_ui() {
     const int tmp_len = (int) strlen(tmp);
 
     print_in_row_col(tmp, rows, cols - tmp_len);
+
+    render_normal_buf();
 }
 
 void render_text(const TextBody *text_body) {
@@ -157,6 +176,8 @@ void render_text(const TextBody *text_body) {
 }
 
 void render(const TextBody *text_body) {
+    clear_screen();
+
     render_ui();
     render_text(text_body);
     move_to_row_col(curr_line_num, curr_char_num);
@@ -173,6 +194,7 @@ int min(const int x, const int y) {
     return (x < y) ? x : y;
 }
 
+// this was a first attempt to play with movement on lines but needs replacement to match VIM motions
 void handle_normal_movement(const char c) {
     const int num_lines = body.len;
 
@@ -198,6 +220,48 @@ void handle_normal_movement(const char c) {
     }
     if (c == 'h' && curr_char_num > 1) {
         curr_char_num--;
+    }
+}
+
+Token identify_token(const char c) {
+    Token token;
+    token.c = c;
+
+    if (isdigit(c)) {
+        token.terminating = false;
+        return token;
+    }
+
+    switch (c) {
+        case 'j':
+        case 'k':
+        case 'l':
+        case 'h':
+            token.terminating = true;
+            break;
+        case 'c':
+            token.terminating = false;
+            break;
+        default:
+            token.terminating = true;
+            break;
+    }
+
+    return token;
+}
+
+void handle_normal_execution() {
+    
+}
+
+void handle_normal_input(const char c) {
+    const Token tk = identify_token(c);
+    normal_buf[normal_buf_len] = tk;
+    normal_buf_len++;
+
+    if (tk.terminating) {
+        handle_normal_execution();
+        normal_buf_len = 0;
     }
 }
 
@@ -229,7 +293,8 @@ bool handle_input() {
     switch (mode) {
         case NORMAL:
             if (c == 'q') return false;
-            handle_normal(c);
+            // handle_normal(c);
+            handle_normal_input(c);
             break;
         case INSERT:
             handle_insert(c);
