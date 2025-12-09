@@ -29,6 +29,13 @@ static int rows, cols;
 static int cursor_row = 1;
 static int cursor_col = 1;
 
+// current line and char position
+static int curr_line_num = 1;
+static int curr_char_num = 1;
+
+// body of text
+TextBody body;
+
 static struct termios orig_termios;
 enum Mode mode = NORMAL;
 
@@ -152,7 +159,7 @@ void render_text(const TextBody *text_body) {
 void render(const TextBody *text_body) {
     render_ui();
     render_text(text_body);
-    move_to_row_col(cursor_row, cursor_col);
+    move_to_row_col(curr_line_num, curr_char_num);
     fflush(stdout);
 }
 
@@ -162,24 +169,45 @@ void handle_winch(int sig) {
     render_ui();
 }
 
+int min(const int x, const int y) {
+    return (x < y) ? x : y;
+}
+
+void handle_normal_movement(const char c) {
+    const int num_lines = body.len;
+
+    const Line *curr_line = &body.lines[curr_line_num - 1];
+    const int curr_line_len = curr_line->len;
+
+    if (c == 'j' && curr_line_num < num_lines) {
+        const Line *below_line = &body.lines[curr_line_num];
+        const int below_line_len = below_line->len;
+        curr_char_num = min(curr_char_num, below_line_len);
+
+        curr_line_num++;
+    }
+    if (c == 'k' && curr_line_num > 1) {
+        const Line *above_line = &body.lines[curr_line_num - 2];
+        const int above_line_len = above_line->len;
+        curr_char_num = min(curr_char_num, above_line_len);
+
+        curr_line_num--;
+    }
+    if (c == 'l' && curr_char_num < curr_line_len) {
+        curr_char_num++;
+    }
+    if (c == 'h' && curr_char_num > 1) {
+        curr_char_num--;
+    }
+}
+
 void handle_normal(const char c) {
+    handle_normal_movement(c);
     if (c == 'i') {
         mode = INSERT;
     }
     if (c == 'v') {
         mode = VISUAL;
-    }
-    if (c == 'j') {
-        cursor_row++;
-    }
-    if (c == 'k' && cursor_row > 1) {
-        cursor_row--;
-    }
-    if (c == 'l') {
-        cursor_col++;
-    }
-    if (c == 'h' && cursor_col > 1) {
-        cursor_col--;
     }
 }
 
@@ -224,11 +252,10 @@ int main(void) {
     enable_raw_mode();
     enter_alternate_screen();
 
-    TextBody body;
     body.lines = malloc(1024 * sizeof(Line));
     body.len = 0;
 
-    char text[] = "Some text.\nMultiple lines";
+    char text[] = "Oh my lord this is the longest.\nSome.\nSome text.\nMultiple lines";
     populate_lines(&body, text);
 
     clear_screen();
