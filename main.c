@@ -194,8 +194,13 @@ int min(const int x, const int y) {
     return (x < y) ? x : y;
 }
 
-// this was a first attempt to play with movement on lines but needs replacement to match VIM motions
-void handle_normal_movement(const char c) {
+// TODO: use rest of input buffer to affect movement by numbers
+// I think it can be done by going back one token at a time, attempting to construct biggest pattern possible, ex 55j as input we can work back to construct 55 as a numeric type of 'motion', or with ciw as input we can construct ci as a motion, a change-type
+
+void handle_normal_movement() {
+    const Token terminating_token = normal_buf[normal_buf_len - 1];
+    const char c = terminating_token.c;
+
     const int num_lines = body.len;
 
     const Line *curr_line = &body.lines[curr_line_num - 1];
@@ -233,6 +238,8 @@ Token identify_token(const char c) {
     }
 
     switch (c) {
+        case 'i':
+        case 'v':
         case 'j':
         case 'k':
         case 'l':
@@ -251,7 +258,25 @@ Token identify_token(const char c) {
 }
 
 void handle_normal_execution() {
-    
+    // last token was terminating
+    const Token terminating_token = normal_buf[normal_buf_len - 1];
+
+    switch (terminating_token.c) {
+        case 'v':
+            mode = VISUAL;
+            break;
+        case 'i':
+            mode = INSERT;
+            break;
+        case 'j':
+        case 'k':
+        case 'h':
+        case 'l':
+            handle_normal_movement();
+            break;
+        default:
+            break;
+    }
 }
 
 void handle_normal_input(const char c) {
@@ -262,16 +287,6 @@ void handle_normal_input(const char c) {
     if (tk.terminating) {
         handle_normal_execution();
         normal_buf_len = 0;
-    }
-}
-
-void handle_normal(const char c) {
-    handle_normal_movement(c);
-    if (c == 'i') {
-        mode = INSERT;
-    }
-    if (c == 'v') {
-        mode = VISUAL;
     }
 }
 
@@ -293,7 +308,6 @@ bool handle_input() {
     switch (mode) {
         case NORMAL:
             if (c == 'q') return false;
-            // handle_normal(c);
             handle_normal_input(c);
             break;
         case INSERT:
