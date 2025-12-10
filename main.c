@@ -23,14 +23,24 @@ typedef struct {
     int len;
 } TextBody;
 
-// need to describe inputs as token
-// so for example 'j' functions to move you down, so '5j' functions to move 5 down
-// so 'j' is a terminating  character, and '5' is not, it's a modifier
+enum TokenType {
+    MOTION,
+    COUNT,
+    ACTION,
+    BAD
+};
 
 typedef struct Token {
     char c;
-    bool terminating;
+    enum TokenType type;
 } Token;
+
+typedef struct MotionModifier {
+    Token count_tks[64];
+    int count_tks_len;
+    Token action_tks[64];
+    int action_tks_len;
+} MotionModifier;
 
 // rows and cols available on current window size
 static int rows, cols;
@@ -194,46 +204,112 @@ int min(const int x, const int y) {
     return (x < y) ? x : y;
 }
 
-// TODO: use rest of input buffer to affect movement by numbers
-// I think it can be done by going back one token at a time, attempting to construct biggest pattern possible, ex 55j as input we can work back to construct 55 as a numeric type of 'motion', or with ciw as input we can construct ci as a motion, a change-type
+MotionModifier identify_motion_modifiers() {
+    MotionModifier mm = {0};
+
+    // before motion token
+    int index = normal_buf_len - 2;
+
+    while (index >= 0) {
+        const Token curr_tk = normal_buf[index];
+
+        // COUNT tokens (last contiguous run)
+        if (curr_tk.type == COUNT && mm.count_tks_len == 0) {
+            int i = index;
+
+            while (i >= 0 && normal_buf[i].type == COUNT) {
+                mm.count_tks[mm.count_tks_len++] = normal_buf[i];
+                i--;
+            }
+
+            index = i;
+            continue;
+        }
+
+        // ACTION tokens (last contiguous run)
+        if (curr_tk.type == ACTION && mm.action_tks_len == 0) {
+            int i = index;
+
+            while (i >= 0 && normal_buf[i].type == ACTION) {
+                mm.action_tks[mm.action_tks_len++] = normal_buf[i];
+                i--;
+            }
+
+            index = i;
+            continue;
+        }
+
+        index--;
+    }
+
+    return mm;
+}
+
+int get_motion_modifier_count(const MotionModifier mm) {
+    int count = 0;
+
+    for (int i = mm.count_tks_len - 1; i >= 0; i--) {
+        const char c = mm.count_tks[i].c;
+        if (c >= '0' && c <= '9') {
+            count = count * 10 + (c - '0');
+        } else {
+        }
+    }
+
+    if (count == 0) count = 1;
+
+    return count;
+}
 
 void handle_normal_movement() {
-    const Token terminating_token = normal_buf[normal_buf_len - 1];
-    const char c = terminating_token.c;
+    const MotionModifier mm = identify_motion_modifiers();
+    const int count = get_motion_modifier_count(mm);
+
+    const Token motion_token = normal_buf[normal_buf_len - 1];
+    const char c = motion_token.c;
 
     const int num_lines = body.len;
 
     const Line *curr_line = &body.lines[curr_line_num - 1];
     const int curr_line_len = curr_line->len;
 
-    if (c == 'j' && curr_line_num < num_lines) {
-        const Line *below_line = &body.lines[curr_line_num];
-        const int below_line_len = below_line->len;
-        curr_char_num = min(curr_char_num, below_line_len);
+    switch (c) {
+        case 'j':
+            for (int i = 0; i < count && curr_line_num < num_lines; i++) {
+                const Line *below_line = &body.lines[curr_line_num];
+                curr_char_num = min(curr_char_num, below_line->len);
+                curr_line_num++;
+            }
+            break;
 
-        curr_line_num++;
-    }
-    if (c == 'k' && curr_line_num > 1) {
-        const Line *above_line = &body.lines[curr_line_num - 2];
-        const int above_line_len = above_line->len;
-        curr_char_num = min(curr_char_num, above_line_len);
+        case 'k':
+            for (int i = 0; i < count && curr_line_num > 1; i++) {
+                const Line *above_line = &body.lines[curr_line_num - 2];
+                curr_char_num = min(curr_char_num, above_line->len);
+                curr_line_num--;
+            }
+            break;
 
-        curr_line_num--;
-    }
-    if (c == 'l' && curr_char_num < curr_line_len) {
-        curr_char_num++;
-    }
-    if (c == 'h' && curr_char_num > 1) {
-        curr_char_num--;
+        case 'l':
+            curr_char_num = min(curr_char_num + count, curr_line_len);
+            break;
+
+        case 'h':
+            curr_char_num = (curr_char_num - count > 0) ? curr_char_num - count : 1;
+            break;
+
+        default:
+            break;
     }
 }
 
 Token identify_token(const char c) {
     Token token;
     token.c = c;
+    token.type = BAD;
 
     if (isdigit(c)) {
-        token.terminating = false;
+        token.type = COUNT;
         return token;
     }
 
@@ -244,13 +320,12 @@ Token identify_token(const char c) {
         case 'k':
         case 'l':
         case 'h':
-            token.terminating = true;
+            token.type = MOTION;
             break;
         case 'c':
-            token.terminating = false;
+            token.type = ACTION;
             break;
         default:
-            token.terminating = true;
             break;
     }
 
@@ -258,10 +333,10 @@ Token identify_token(const char c) {
 }
 
 void handle_normal_execution() {
-    // last token was terminating
-    const Token terminating_token = normal_buf[normal_buf_len - 1];
+    // last token was terminating because it is a MOTION
+    const Token motion_token = normal_buf[normal_buf_len - 1];
 
-    switch (terminating_token.c) {
+    switch (motion_token.c) {
         case 'v':
             mode = VISUAL;
             break;
@@ -284,7 +359,7 @@ void handle_normal_input(const char c) {
     normal_buf[normal_buf_len] = tk;
     normal_buf_len++;
 
-    if (tk.terminating) {
+    if (tk.type == MOTION) {
         handle_normal_execution();
         normal_buf_len = 0;
     }
